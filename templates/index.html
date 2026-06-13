@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Quick Note</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Lora:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <div class="page">
+    <header>
+      <div class="header-top">
+        <h1>quick note</h1>
+        <div class="user-tag">
+          <span id="username-tag">{{ username }}</span>
+          <button id="logout-btn" title="Sign out">Sign out</button>
+        </div>
+      </div>
+      <p>jot it down before it slips &mdash; saved straight to the notebook</p>
+    </header>
+
+    <section class="composer">
+      <textarea id="note-input" placeholder="Write something worth remembering..." maxlength="2000"></textarea>
+      <div class="composer-footer">
+        <span class="char-count" id="char-count">0 / 2000</span>
+        <button class="save" id="save-btn">Save note</button>
+      </div>
+      <div class="error-msg" id="error-msg"></div>
+    </section>
+
+    <h2 class="notes-heading">Notebook</h2>
+    <div class="notes-grid" id="notes-grid">
+      <div class="empty-state">No notes yet. Write your first one above.</div>
+    </div>
+  </div>
+
+  <script>
+    const textarea = document.getElementById('note-input');
+    const charCount = document.getElementById('char-count');
+    const saveBtn = document.getElementById('save-btn');
+    const errorMsg = document.getElementById('error-msg');
+    const notesGrid = document.getElementById('notes-grid');
+    const MAX_LEN = 2000;
+
+    textarea.addEventListener('input', () => {
+      const len = textarea.value.length;
+      charCount.textContent = `${len} / ${MAX_LEN}`;
+      charCount.classList.toggle('over', len > MAX_LEN);
+    });
+
+    function formatDate(isoString) {
+      const d = new Date(isoString);
+      return d.toLocaleString(undefined, {
+        month: 'short', day: 'numeric', year: 'numeric',
+        hour: '2-digit', minute: '2-digit'
+      });
+    }
+
+    function renderNotes(notes) {
+      notesGrid.innerHTML = '';
+      if (!notes.length) {
+        notesGrid.innerHTML = '<div class="empty-state">No notes yet. Write your first one above.</div>';
+        return;
+      }
+      notes.forEach(note => {
+        const card = document.createElement('div');
+        card.className = 'note-card';
+
+        const text = document.createElement('div');
+        text.className = 'note-text';
+        text.textContent = note.content;
+
+        const meta = document.createElement('div');
+        meta.className = 'note-meta';
+
+        const date = document.createElement('span');
+        date.textContent = formatDate(note.created_at);
+
+        const del = document.createElement('button');
+        del.className = 'note-delete';
+        del.textContent = 'Delete';
+        del.addEventListener('click', () => deleteNote(note.id));
+
+        meta.appendChild(date);
+        meta.appendChild(del);
+        card.appendChild(text);
+        card.appendChild(meta);
+        notesGrid.appendChild(card);
+      });
+    }
+
+    async function loadNotes() {
+      try {
+        const res = await fetch('/api/notes');
+        if (res.status === 401) {
+          window.location.href = '/login';
+          return;
+        }
+        const notes = await res.json();
+        renderNotes(notes);
+      } catch (err) {
+        errorMsg.textContent = 'Could not load notes. Is the server running?';
+      }
+    }
+
+    async function saveNote() {
+      const content = textarea.value.trim();
+      errorMsg.textContent = '';
+
+      if (!content) {
+        errorMsg.textContent = 'Write something before saving.';
+        return;
+      }
+      if (content.length > MAX_LEN) {
+        errorMsg.textContent = `Note is too long (max ${MAX_LEN} characters).`;
+        return;
+      }
+
+      saveBtn.disabled = true;
+      saveBtn.textContent = 'Saving...';
+
+      try {
+        const res = await fetch('/api/notes', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ content })
+        });
+        const data = await res.json();
+
+        if (!res.ok) {
+          errorMsg.textContent = data.error || 'Something went wrong.';
+          return;
+        }
+
+        textarea.value = '';
+        charCount.textContent = `0 / ${MAX_LEN}`;
+        charCount.classList.remove('over');
+        await loadNotes();
+      } catch (err) {
+        errorMsg.textContent = 'Could not reach the server. Try again.';
+      } finally {
+        saveBtn.disabled = false;
+        saveBtn.textContent = 'Save note';
+      }
+    }
+
+    async function deleteNote(id) {
+      try {
+        await fetch(`/api/notes/${id}`, { method: 'DELETE' });
+        await loadNotes();
+      } catch (err) {
+        errorMsg.textContent = 'Could not delete that note.';
+      }
+    }
+
+    saveBtn.addEventListener('click', saveNote);
+    textarea.addEventListener('keydown', (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+        saveNote();
+      }
+    });
+
+    document.getElementById('logout-btn').addEventListener('click', async () => {
+      try {
+        await fetch('/api/logout', { method: 'POST' });
+      } finally {
+        window.location.href = '/login';
+      }
+    });
+
+    loadNotes();
+  </script>
+</body>
+</html>
